@@ -1,5 +1,6 @@
-// WatermarkClip.cpp
-// Compile with: /DUNICODE /D_UNICODE and link with Comdlg32.lib, Msimg32.lib, Gdi32.lib, User32.lib, Advapi32.lib
+// ClipboardWaterer.cpp
+// Compile with: /DUNICODE /D_UNICODE and link with Comdlg32.lib, Msimg32.lib, Gdi32.lib, User32.lib
+
 #define _WIN32_WINNT 0x0600
 
 #include <windows.h>
@@ -10,12 +11,42 @@
 #pragma comment(lib, "Comdlg32.lib")
 #pragma comment(lib, "Msimg32.lib")
 
-// Global variable to hold the watermark bitmap handle.
+//---------------------------------------------------------------------------
+// Enumeration for watermark position options.
+//---------------------------------------------------------------------------
+enum WatermarkPositionEnum {
+    WM_POS_TOP_LEFT = 0,
+    WM_POS_TOP_CENTER,
+    WM_POS_TOP_RIGHT,
+    WM_POS_MIDDLE_LEFT,
+    WM_POS_CENTER,
+    WM_POS_MIDDLE_RIGHT,
+    WM_POS_BOTTOM_LEFT,
+    WM_POS_BOTTOM_CENTER,
+    WM_POS_BOTTOM_RIGHT
+};
+
+// Global variable for the currently selected watermark position.
+// Default is Bottom Right.
+int g_WatermarkPos = WM_POS_BOTTOM_RIGHT;
+
+// Global variable for the watermark bitmap handle.
 HBITMAP g_hWatermark = NULL;
 
-//--------------------------------------------------------------------------------
+// Define control IDs for the radio buttons.
+#define ID_RADIO_TOP_LEFT      1001
+#define ID_RADIO_TOP_CENTER    1002
+#define ID_RADIO_TOP_RIGHT     1003
+#define ID_RADIO_MIDDLE_LEFT   1004
+#define ID_RADIO_CENTER        1005
+#define ID_RADIO_MIDDLE_RIGHT  1006
+#define ID_RADIO_BOTTOM_LEFT   1007
+#define ID_RADIO_BOTTOM_CENTER 1008
+#define ID_RADIO_BOTTOM_RIGHT  1009
+
+//---------------------------------------------------------------------------
 // SelectWatermarkImage - Opens a file dialog to let the user choose a BMP file.
-//--------------------------------------------------------------------------------
+//---------------------------------------------------------------------------
 void SelectWatermarkImage(HWND hWnd)
 {
     OPENFILENAME ofn;
@@ -50,10 +81,10 @@ void SelectWatermarkImage(HWND hWnd)
     }
 }
 
-//--------------------------------------------------------------------------------
+//---------------------------------------------------------------------------
 // CombineImages - Creates a composite bitmap by drawing the watermark over the source bitmap.
 // Returns a new HBITMAP with the result.
-//--------------------------------------------------------------------------------
+//---------------------------------------------------------------------------
 HBITMAP CombineImages(HBITMAP hSource, HBITMAP hWatermark)
 {
     if (!hSource || !hWatermark)
@@ -76,26 +107,63 @@ HBITMAP CombineImages(HBITMAP hSource, HBITMAP hWatermark)
     // Select the source image into its DC.
     HBITMAP hOldSource = (HBITMAP)SelectObject(hdcSource, hSource);
 
-    // Start with a copy of the source image.
+    // Copy the source image into the composite image.
     BitBlt(hdcComposite, 0, 0, bmSource.bmWidth, bmSource.bmHeight,
         hdcSource, 0, 0, SRCCOPY);
 
     // Prepare the watermark DC.
     HBITMAP hOldWatermark = (HBITMAP)SelectObject(hdcWatermark, hWatermark);
 
-    // Determine the position for the watermark (e.g., lower right corner with a margin).
+    // Determine position (x,y) for the watermark based on the selected option.
     int margin = 10;
-    int x = bmSource.bmWidth - bmWatermark.bmWidth - margin;
-    int y = bmSource.bmHeight - bmWatermark.bmHeight - margin;
-    if (x < 0) x = 0;
-    if (y < 0) y = 0;
+    int x = 0, y = 0;
+    switch (g_WatermarkPos)
+    {
+    case WM_POS_TOP_LEFT:
+        x = margin;
+        y = margin;
+        break;
+    case WM_POS_TOP_CENTER:
+        x = (bmSource.bmWidth - bmWatermark.bmWidth) / 2;
+        y = margin;
+        break;
+    case WM_POS_TOP_RIGHT:
+        x = bmSource.bmWidth - bmWatermark.bmWidth - margin;
+        y = margin;
+        break;
+    case WM_POS_MIDDLE_LEFT:
+        x = margin;
+        y = (bmSource.bmHeight - bmWatermark.bmHeight) / 2;
+        break;
+    case WM_POS_CENTER:
+        x = (bmSource.bmWidth - bmWatermark.bmWidth) / 2;
+        y = (bmSource.bmHeight - bmWatermark.bmHeight) / 2;
+        break;
+    case WM_POS_MIDDLE_RIGHT:
+        x = bmSource.bmWidth - bmWatermark.bmWidth - margin;
+        y = (bmSource.bmHeight - bmWatermark.bmHeight) / 2;
+        break;
+    case WM_POS_BOTTOM_LEFT:
+        x = margin;
+        y = bmSource.bmHeight - bmWatermark.bmHeight - margin;
+        break;
+    case WM_POS_BOTTOM_CENTER:
+        x = (bmSource.bmWidth - bmWatermark.bmWidth) / 2;
+        y = bmSource.bmHeight - bmWatermark.bmHeight - margin;
+        break;
+    case WM_POS_BOTTOM_RIGHT:
+    default:
+        x = bmSource.bmWidth - bmWatermark.bmWidth - margin;
+        y = bmSource.bmHeight - bmWatermark.bmHeight - margin;
+        break;
+    }
 
-    // Use AlphaBlend to mix the watermark over the source. Adjust SourceConstantAlpha to change watermark opacity if desired.
+    // Use AlphaBlend to mix the watermark over the source image.
     BLENDFUNCTION blend = {};
     blend.BlendOp = AC_SRC_OVER;
     blend.BlendFlags = 0;
-    blend.SourceConstantAlpha = 255; // 255 = fully opaque; lower to make watermark translucent.
-    blend.AlphaFormat = 0;           // This example assumes no per-pixel alpha.
+    blend.SourceConstantAlpha = 255; // Fully opaque; adjust if transparency is desired.
+    blend.AlphaFormat = 0;           // Assume bitmap has no per-pixel alpha.
 
     AlphaBlend(hdcComposite, x, y, bmWatermark.bmWidth, bmWatermark.bmHeight,
         hdcWatermark, 0, 0, bmWatermark.bmWidth, bmWatermark.bmHeight, blend);
@@ -112,9 +180,10 @@ HBITMAP CombineImages(HBITMAP hSource, HBITMAP hWatermark)
     return hComposite;
 }
 
-//--------------------------------------------------------------------------------
-// ProcessClipboardUpdate - Checks if the clipboard contains a bitmap, then overlays the watermark.
-//--------------------------------------------------------------------------------
+//---------------------------------------------------------------------------
+// ProcessClipboardUpdate - Checks if the clipboard contains a bitmap,
+// then overlays the watermark.
+//---------------------------------------------------------------------------
 void ProcessClipboardUpdate(HWND hWnd)
 {
     if (!g_hWatermark)
@@ -135,7 +204,7 @@ void ProcessClipboardUpdate(HWND hWnd)
         return;
     }
 
-    // Duplicate the clipboard bitmap because the handle from the clipboard is managed by the system.
+    // Duplicate the clipboard bitmap.
     BITMAP bm;
     GetObject(hClipboardBitmap, sizeof(BITMAP), &bm);
 
@@ -150,7 +219,7 @@ void ProcessClipboardUpdate(HWND hWnd)
 
     BitBlt(hdcMem, 0, 0, bm.bmWidth, bm.bmHeight, hdcTemp, 0, 0, SRCCOPY);
 
-    // Clean up temporary DCs.
+    // Cleanup temporary DCs.
     SelectObject(hdcMem, hOldBitmap);
     SelectObject(hdcTemp, hOldTemp);
     DeleteDC(hdcTemp);
@@ -171,9 +240,69 @@ void ProcessClipboardUpdate(HWND hWnd)
     CloseClipboard();
 }
 
-//--------------------------------------------------------------------------------
+//---------------------------------------------------------------------------
+// CreateRadioButtons - Create nine radio buttons for watermark position
+//---------------------------------------------------------------------------
+void CreateRadioButtons(HWND hWnd, HINSTANCE hInst)
+{
+    // Dimensions and layout for radio buttons.
+    int radioWidth = 100;
+    int radioHeight = 20;
+    int startX = 10;
+    int startY = 300; // using the bottom region of a 500x400 window
+    int spacingX = radioWidth + 10;
+    int spacingY = radioHeight + 5;
+
+    // Top row
+    CreateWindowW(L"BUTTON", L"Top Left",
+        WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP,
+        startX, startY,
+        radioWidth, radioHeight, hWnd, (HMENU)ID_RADIO_TOP_LEFT, hInst, NULL);
+    CreateWindowW(L"BUTTON", L"Top Center",
+        WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
+        startX + spacingX, startY,
+        radioWidth, radioHeight, hWnd, (HMENU)ID_RADIO_TOP_CENTER, hInst, NULL);
+    CreateWindowW(L"BUTTON", L"Top Right",
+        WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
+        startX + 2 * spacingX, startY,
+        radioWidth, radioHeight, hWnd, (HMENU)ID_RADIO_TOP_RIGHT, hInst, NULL);
+
+    // Middle row
+    CreateWindowW(L"BUTTON", L"Middle Left",
+        WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP,
+        startX, startY + spacingY,
+        radioWidth, radioHeight, hWnd, (HMENU)ID_RADIO_MIDDLE_LEFT, hInst, NULL);
+    CreateWindowW(L"BUTTON", L"Center",
+        WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
+        startX + spacingX, startY + spacingY,
+        radioWidth, radioHeight, hWnd, (HMENU)ID_RADIO_CENTER, hInst, NULL);
+    CreateWindowW(L"BUTTON", L"Middle Right",
+        WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
+        startX + 2 * spacingX, startY + spacingY,
+        radioWidth, radioHeight, hWnd, (HMENU)ID_RADIO_MIDDLE_RIGHT, hInst, NULL);
+
+    // Bottom row
+    CreateWindowW(L"BUTTON", L"Bottom Left",
+        WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP,
+        startX, startY + 2 * spacingY,
+        radioWidth, radioHeight, hWnd, (HMENU)ID_RADIO_BOTTOM_LEFT, hInst, NULL);
+    CreateWindowW(L"BUTTON", L"Bottom Center",
+        WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
+        startX + spacingX, startY + 2 * spacingY,
+        radioWidth, radioHeight, hWnd, (HMENU)ID_RADIO_BOTTOM_CENTER, hInst, NULL);
+    CreateWindowW(L"BUTTON", L"Bottom Right",
+        WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
+        startX + 2 * spacingX, startY + 2 * spacingY,
+        radioWidth, radioHeight, hWnd, (HMENU)ID_RADIO_BOTTOM_RIGHT, hInst, NULL);
+
+    // Set default selection to "Bottom Right"
+    HWND hRadioDefault = GetDlgItem(hWnd, ID_RADIO_BOTTOM_RIGHT);
+    SendMessage(hRadioDefault, BM_SETCHECK, BST_CHECKED, 0);
+}
+
+//---------------------------------------------------------------------------
 // Window Procedure
-//--------------------------------------------------------------------------------
+//---------------------------------------------------------------------------
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
@@ -185,22 +314,63 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
             MessageBox(hWnd, L"Failed to add clipboard format listener.", L"Error", MB_OK | MB_ICONERROR);
         }
+        // Create a simple menu with a command to select a watermark image.
+        HMENU hMenu = CreateMenu();
+        HMENU hFileMenu = CreatePopupMenu();
+        AppendMenuW(hFileMenu, MF_STRING, 1, L"Select Watermark Image");
+        AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hFileMenu, L"File");
+        SetMenu(hWnd, hMenu);
+
+        // Create radio buttons for position selection.
+        CREATESTRUCT* pcs = (CREATESTRUCT*)lParam;
+        HINSTANCE hInst = pcs->hInstance;
+        CreateRadioButtons(hWnd, hInst);
     }
     break;
 
     case WM_CLIPBOARDUPDATE:
     {
-        // Process new clipboard content.
         ProcessClipboardUpdate(hWnd);
     }
     break;
 
     case WM_COMMAND:
     {
-        // Use menu command (ID 1) to allow the user to select a watermark image.
-        if (LOWORD(wParam) == 1)
+        switch (LOWORD(wParam))
         {
+        case 1:
+            // Menu: select watermark image.
             SelectWatermarkImage(hWnd);
+            break;
+
+            // Process radio button selection.
+        case ID_RADIO_TOP_LEFT:
+            g_WatermarkPos = WM_POS_TOP_LEFT;
+            break;
+        case ID_RADIO_TOP_CENTER:
+            g_WatermarkPos = WM_POS_TOP_CENTER;
+            break;
+        case ID_RADIO_TOP_RIGHT:
+            g_WatermarkPos = WM_POS_TOP_RIGHT;
+            break;
+        case ID_RADIO_MIDDLE_LEFT:
+            g_WatermarkPos = WM_POS_MIDDLE_LEFT;
+            break;
+        case ID_RADIO_CENTER:
+            g_WatermarkPos = WM_POS_CENTER;
+            break;
+        case ID_RADIO_MIDDLE_RIGHT:
+            g_WatermarkPos = WM_POS_MIDDLE_RIGHT;
+            break;
+        case ID_RADIO_BOTTOM_LEFT:
+            g_WatermarkPos = WM_POS_BOTTOM_LEFT;
+            break;
+        case ID_RADIO_BOTTOM_CENTER:
+            g_WatermarkPos = WM_POS_BOTTOM_CENTER;
+            break;
+        case ID_RADIO_BOTTOM_RIGHT:
+            g_WatermarkPos = WM_POS_BOTTOM_RIGHT;
+            break;
         }
     }
     break;
@@ -223,15 +393,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     return 0;
 }
 
-//--------------------------------------------------------------------------------
+//---------------------------------------------------------------------------
 // WinMain - Program entry point
-//--------------------------------------------------------------------------------
+//---------------------------------------------------------------------------
 int APIENTRY WinMain(HINSTANCE hInstance,
     HINSTANCE hPrevInstance,
     LPSTR     lpCmdLine,
     int       nCmdShow)
 {
-    const wchar_t szWindowClass[] = L"WatermarkClipWindow";
+    const wchar_t szWindowClass[] = L"ClipboardWatererWindow";
     const wchar_t szTitle[] = L"Clipboard Watermark Utility";
 
     WNDCLASSEXW wcex;
@@ -253,13 +423,6 @@ int APIENTRY WinMain(HINSTANCE hInstance,
         NULL, NULL, hInstance, NULL);
     if (!hWnd)
         return 1;
-
-    // Create a simple menu with a command to select a watermark image.
-    HMENU hMenu = CreateMenu();
-    HMENU hFileMenu = CreatePopupMenu();
-    AppendMenuW(hFileMenu, MF_STRING, 1, L"Select Watermark Image");
-    AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hFileMenu, L"File");
-    SetMenu(hWnd, hMenu);
 
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
